@@ -1,0 +1,660 @@
+---
+title: "GIS_Coursework"
+author: "Eleni Kalantzi"
+date: 11/01/21
+output: 
+  html_document: default
+  pdf_document: default
+---
+# **Τhe relationship between obesity and socioeconomic factors and its geographical variation per London borough**
+
+## Installing the libraries:
+```{r}
+library(tidyverse)
+library(tmap)
+library(geojsonio)
+library(plotly)
+library(rgdal)
+library(broom)
+library(crosstalk)
+library(sf)
+library(sp)
+library(spdep)
+library(car)
+library(fs)
+library(janitor)
+library(broom)
+library(spgwr)
+library(GWmodel)
+library(spatialreg)
+library(corrr)
+library(corrplot)
+source("http://www.sthda.com/upload/rquery_cormat.r")
+```
+
+## 1. Importing the shapefile for Analysis
+```{r}
+LondonBoroughs<-dir_info(here::here("statistical-gis-boundaries-london", 
+                                 "ESRI"))%>%
+  dplyr::filter(str_detect(path, 
+                           "London_Borough_Excluding_MHW.shp$"))%>%
+  dplyr::select(path)%>%
+  pull()%>%
+## read in the file in
+  st_read()
+qtm(LondonBoroughs)
+```
+
+## 2. Reading the OLS regression data:
+```{r}
+Datareg <- readxl::read_xlsx('overall.xlsx')
+## basic statistics
+summary(Datareg[3:8])
+sd(Datareg$Percentage_with_no_qualifications_aged_25_64)
+sd(Datareg$`Percentage_of _Obese_Children_in_Year_6`)
+```
+
+#### Merge boundaries and data:
+```{r}
+LonBoroughs <- LondonBoroughs%>%
+  left_join(.,
+            Datareg, 
+            by = c("GSS_CODE" = "Borough Code"))
+```
+
+#### Visualise the independent variables to observe their spatial variation:
+```{r}
+tmap_mode("plot")
+tm1 <- tm_shape(LonBoroughs) + 
+  tm_polygons("Percentage_of _Obese_Children_in_Year_6", 
+              style="jenks",
+              palette="Reds")+
+  tm_layout(main.title = "Chilhood Obesity in 2017-2018 per London Borough", main.title.position = "center", main.title.size = 1.4, legend.show=TRUE, legend.position=c("left","bottom"), legend.title.size = 0.8, legend.frame=TRUE)+
+  tm_scale_bar(position=c("right", "top"), text.size=0.6)+
+  tm_compass(north=0,type="8star", position=c("left", "top"))+
+  tm_credits("Contains National Statistics\nand Ordnance Survey\ndata Β© Crown copyright\nand database right [2015]\nDepartment: CASA-UCL\nCourse:GIS, Professors:\nA.Denett & A.Maclachlan\nCreated by: Eleni Kalantzi\nDate: 27/12/20", position=c("right", "bottom"))
+tm1
+tmap_save(tm1, 'ChOb.png', dpi=300)
+tm2 <- tm_shape(LonBoroughs) + 
+  tm_polygons("Median_annual_income", 
+              style="jenks",
+              palette="Blues")+
+  tm_layout(main.title = "Personal Income by Tax Year 2017-2018", main.title.position = "center", main.title.size = 1.3, legend.show=TRUE, legend.position=c("left","bottom"), legend.frame=TRUE)+
+  tm_scale_bar(position=c("right", "top"), text.size=0.6)+
+  tm_compass(north=0,type="8star", position=c("left", "top"))+
+  tm_credits("Contains National Statistics\nand Ordnance Survey\ndata Β© Crown copyright\nand database right [2015]\nDepartment: CASA-UCL\nCourse:GIS, Professors:\nA.Denett & A.Maclachlan\nCreated by: Eleni Kalantzi\nDate: 27/12/20", position=c("right", "bottom"))
+tm2
+tmap_save(tm2, 'Med_Income.png', dpi=300)
+tm3 <- tm_shape(LonBoroughs) + 
+  tm_polygons("Population_per_square_km", 
+              style="quantile",
+              palette="YlOrRd")+
+  tm_layout(main.title = "Population Density in 2018 per London Borough", main.title.position = "center", main.title.size = 1.1, legend.show=TRUE, legend.position=c("left","bottom"), legend.frame=TRUE)+
+  tm_scale_bar(position=c("right", "top"), text.size=0.6)+
+  tm_compass(north=0,type="8star", position=c("left", "top"))+
+  tm_credits("Contains National Statistics\nand Ordnance Survey\ndata Β© Crown copyright\nand database right [2015]\nDepartment: CASA-UCL\nCourse:GIS, Professors:\nA.Denett & A.Maclachlan\nCreated by: Eleni Kalantzi\nDate: 27/12/20", position=c("right", "bottom"))
+tm3
+tmap_save(tm3, 'Density.png', dpi=300)
+tm4 <- tm_shape(LonBoroughs) + 
+  tm_polygons("Percentage_with_no_qualifications_aged_25_64", 
+              style="quantile",
+              palette="Purples")+
+  tm_layout(main.title = "People aged 25-64 with no academic/professional qualifications in 2018", main.title.position = "center", main.title.size = 1.2, legend.show=TRUE, legend.position=c("left","bottom"), legend.frame=TRUE)+
+  tm_scale_bar(position=c("right", "top"), text.size=0.6)+
+  tm_compass(north=0,type="8star", position=c("left", "top"))+
+  tm_credits("Contains National Statistics\nand Ordnance Survey\ndata Β© Crown copyright\nand database right [2015]\nDepartment: CASA-UCL\nCourse:GIS, Professors:\nA.Denett & A.Maclachlan\nCreated by: Eleni Kalantzi\nDate: 27/12/20", position=c("right", "bottom"))
+tm4
+tmap_save(tm4, 'Education.png', dpi=300)
+
+tm5 <- tm_shape(LonBoroughs) + 
+  tm_polygons("Percentage_of_homes_with_deficiency_in_access_to_nature", 
+              style="quantile",
+              palette="Greens")+
+  tm_layout(main.title = "Percentage of homes located within open space and access to nature in 2012", main.title.position = "center", main.title.size = 1.1, legend.show=TRUE, legend.position=c("left","bottom"),legend.title.size = 0.8,
+            legend.frame=TRUE)+
+  tm_scale_bar(position=c("right", "top"), text.size=0.6)+
+  tm_compass(north=0,type="8star", position=c("left", "top"))+
+  tm_credits("Contains National Statistics\nand Ordnance Survey\ndata Β© Crown copyright\nand database right [2015]\nDepartment: CASA-UCL\nCourse:GIS, Professors:\nA.Denett & A.Maclachlan\nCreated by: Eleni Kalantzi\nDate: 27/12/20", position=c("right", "bottom"))
+tm5
+tmap_save(tm5, 'Nature.png', dpi=300)
+
+tm6 <- tm_shape(LonBoroughs) + 
+  tm_polygons("Fast_food_outlets_per_100_residents", 
+              style="quantile",
+              palette="RdPu")+
+  tm_layout(main.title = "Density of fast food outlets at 02/07/2018", main.title.position = "center", main.title.size = 1.1, legend.show=TRUE, legend.position=c("left","bottom"),legend.title.size = 0.9,
+            legend.frame=TRUE)+
+  tm_scale_bar(position=c("right", "top"), text.size=0.6)+
+  tm_compass(north=0,type="8star", position=c("left", "top"))+
+  tm_credits("Contains National Statistics\nand Ordnance Survey\ndata Β© Crown copyright\nand database right [2015]\nDepartment: CASA-UCL\nCourse:GIS, Professors:\nA.Denett & A.Maclachlan\nCreated by: Eleni Kalantzi\nDate: 27/12/20", position=c("right", "bottom"))
+tm6
+tmap_save(tm6, 'Fast_Food.png', dpi=300)
+```
+
+### Run regression for model 1:
+```{r}
+model1 <- lm(LonBoroughs$`Percentage_of _Obese_Children_in_Year_6` ~ 
+            LonBoroughs$Median_annual_income + 
+            LonBoroughs$Percentage_with_no_qualifications_aged_25_64 + 
+            LonBoroughs$Population_per_square_km + 
+            LonBoroughs$Percentage_of_homes_with_deficiency_in_access_to_nature+
+            LonBoroughs$Fast_food_outlets_per_100_residents)
+summary(model1)
+tidy(model1)
+glance(model1)
+```
+
+### Histograms and transformations
+#### We'll plot some histograms to check if the variables follow normal distribution:
+```{r}
+hist(LonBoroughs$`Percentage_of _Obese_Children_in_Year_6`, 
+     main="Figure 2: A histogram of the distribution of the Childhood Obesity variable", 
+     xlab="% of Obese Children in Year 6", 
+     border="black", 
+     col="white",
+     las=1, 
+     breaks=20, 
+     freq = FALSE)
+lines(density(LonBoroughs$`Percentage_of _Obese_Children_in_Year_6`), col="red", lwd=3)
+
+hist(LonBoroughs$Median_annual_income, 
+     main="Figure 3: A histogram of median annual income variable", 
+     xlab="median annual income", 
+     border="black", 
+     col="white",
+     las=1, 
+     breaks=20, 
+     freq = FALSE)
+
+lines(density(LonBoroughs$Median_annual_income), col="red", lwd=3)
+
+hist(LonBoroughs$Population_per_square_km, 
+     main="Figure 6: A histogram of population density variable", 
+     xlab="population per square km", 
+     border="black", 
+     col="white",
+     las=1, 
+     breaks=20, 
+     freq = FALSE)
+
+lines(density(LonBoroughs$Population_per_square_km), col="red", lwd=3)
+
+hist(LonBoroughs$Percentage_with_no_qualifications_aged_25_64, 
+     main="Figure 9: A histogram of people without qualifications variable", 
+     xlab="% of people with no qualifications aged 25-64", 
+     border="black", 
+     col="white",
+     las=1, 
+     breaks=20, 
+     freq = FALSE)
+
+lines(density(LonBoroughs$Percentage_with_no_qualifications_aged_25_64), col="red", lwd=3)
+
+hist(LonBoroughs$Percentage_of_homes_with_deficiency_in_access_to_nature, 
+     main="Figure 10: A histogram of access to nature variable", 
+     xlab="% of home with deficient access to nature", 
+     border="black", 
+     col="white",
+     las=1, 
+     breaks=20, 
+     freq = FALSE)
+
+lines(density(LonBoroughs$Percentage_of_homes_with_deficiency_in_access_to_nature), col="red", lwd=3)
+
+hist(LonBoroughs$Fast_food_outlets_per_100_residents, 
+     main="Figure 13: A histogram of density of Fast Food outlets variable", 
+     xlab="Fast Food outlets per 100 residents", 
+     border="black", 
+     col="white",
+     las=1, 
+     breaks=20, 
+     freq = FALSE)
+
+lines(density(LonBoroughs$Fast_food_outlets_per_100_residents), col="red", lwd=3)
+```
+
+#### We'll use symbox to help us find the appropriate transformation:
+```{r}
+symbox(~`Percentage_of _Obese_Children_in_Year_6`, 
+       LonBoroughs, 
+       na.rm=T,
+       powers=seq(-4,4,by=.5))
+
+symbox(~Median_annual_income, 
+       LonBoroughs, 
+       na.rm=T,
+       powers=seq(-4,4,by=.5))
+
+symbox(~Population_per_square_km, 
+       LonBoroughs, 
+       na.rm=T,
+       powers=seq(-4,4,by=.5))
+
+symbox(~Percentage_of_homes_with_deficiency_in_access_to_nature, 
+       LonBoroughs, 
+       na.rm=T,
+       powers=seq(-4,4,by=.5))
+
+symbox(~Fast_food_outlets_per_100_residents, 
+       LonBoroughs, 
+       na.rm=T,
+       powers=seq(-4,4,by=.5))
+```
+
+#### Transform data for new regression models:
+```{r}
+Data_reg_trans <- readxl::read_xlsx('trans_reg.xlsx')
+## Merge transformed data and boundaries
+LonBoroughstrans <- LondonBoroughs%>%
+  left_join(.,
+            Data_reg_trans, 
+            by = c("GSS_CODE" = "Borough Code"))
+```
+
+#### Plot histograms of transformed variables:
+```{r}
+hist(LonBoroughstrans$`Median_annual_income _^-2.5`, 
+     main="Figure 5: A histogram of (median annual income)^-2.5 variable", 
+     xlab="(median annual income)^-2.5", 
+     border="black", 
+     col="white",
+     las=1, 
+     breaks=20, 
+     freq = FALSE)
+
+lines(density(LonBoroughstrans$`Median_annual_income _^-2.5`), col="red", lwd=3)
+
+hist(LonBoroughstrans$log_Population_per_square_km, 
+     main="Figure 8: A histogram of log population density variable", 
+     xlab="log(population per square km)", 
+     border="black", 
+     col="white",
+     las=1, 
+     breaks=20, 
+     freq = FALSE)
+
+lines(density(LonBoroughstrans$log_Population_per_square_km), col="red", lwd=3)
+
+hist((LonBoroughs$Percentage_of_homes_with_deficiency_in_access_to_nature)^-0.5, 
+     main="Figure 12: A histogram of (access to nature)^-0.5 variable", 
+     xlab="(% of home with deficient access to nature)^-0.5", 
+     border="black", 
+     col="white",
+     las=1, 
+     breaks=20, 
+     freq = FALSE)
+
+lines(density((LonBoroughs$Percentage_of_homes_with_deficiency_in_access_to_nature)^-0.5), col="red", lwd=3)
+
+hist(LonBoroughstrans$`Fast_food_outlets_per_100_residents_^-1`, 
+     main="Figure 15: A histogram of density of (Fast Food outlets)^-1 variable", 
+     xlab="(Fast Food outlets per 100 residents)^-1", 
+     border="black", 
+     col="white",
+     las=1, 
+     breaks=20, 
+     freq = FALSE)
+
+lines(density(LonBoroughstrans$`Fast_food_outlets_per_100_residents_^-1`), col="red", lwd=3)
+```
+
+### Run regression for model 2:
+```{r}
+model2 <- lm(Data_reg_trans$`Percentage_of _Obese_Children_in_Year_6` ~ 
+              Data_reg_trans$`Median_annual_income _^-2.5` + 
+              Data_reg_trans$Percentage_with_no_qualifications_aged_25_64 + 
+              Data_reg_trans$log_Population_per_square_km + 
+              Data_reg_trans$Percentage_of_homes_with_deficiency_in_access_to_nature +
+              Data_reg_trans$`Fast_food_outlets_per_100_residents_^-1`)
+summary(model2)
+tidy(model2)
+glance(model2)
+```
+#### We'll exclude the statistically insignificant variable and re-run the regression.
+
+### Run regression for model 3:
+```{r}
+model3 <- lm(Data_reg_trans$`Percentage_of _Obese_Children_in_Year_6` ~ 
+              Data_reg_trans$`Median_annual_income _^-2.5` + 
+              Data_reg_trans$log_Population_per_square_km + 
+              Data_reg_trans$Percentage_of_homes_with_deficiency_in_access_to_nature +
+              Data_reg_trans$`Fast_food_outlets_per_100_residents_^-1`)
+summary(model3)
+tidy(model3)
+glance(model3)
+```
+
+### Regression Assumptions for model 3:
+#### a. Plot regression fit line
+```{r}
+q <- qplot(x = `Median_annual_income _^-2.5`, 
+           y = `Percentage_of _Obese_Children_in_Year_6`, 
+           data=LonBoroughstrans)
+q + stat_smooth(method="lm", se=FALSE, size=1) + 
+  geom_jitter()
+q1 <- qplot(x = log_Population_per_square_km, 
+           y = `Percentage_of _Obese_Children_in_Year_6`, 
+           data=LonBoroughstrans)
+q1 + stat_smooth(method="lm", se=FALSE, size=1) + 
+  geom_jitter()
+q2 <- qplot(x = Percentage_of_homes_with_deficiency_in_access_to_nature, 
+           y = `Percentage_of _Obese_Children_in_Year_6`, 
+           data=LonBoroughstrans)
+q2 + stat_smooth(method="lm", se=FALSE, size=1) + 
+  geom_jitter()
+q3 <- qplot(x = `Fast_food_outlets_per_100_residents_^-1`, 
+           y = `Percentage_of _Obese_Children_in_Year_6`, 
+           data=LonBoroughstrans)
+q3 + stat_smooth(method="lm", se=FALSE, size=1) + 
+  geom_jitter()
+```
+
+#### b. Check the residuals into our dataframe
+```{r}
+# Save the residuals into our dataframe
+model_data <- model3 %>%
+  augment(., Data_reg_trans)
+# Add them to the shapelayer
+LonBoroughstrans <- LonBoroughstrans %>%
+  mutate(model3resids = residuals(model3))
+# Plot residuals to see if they follow normal distribution
+model_data%>%
+  dplyr::select(.resid)%>%
+  pull()%>%
+  qplot()+ 
+  geom_histogram(bins=30)
+```
+
+#### c. Visualisation of the correlation matrix
+```{r}
+# library corrplot + rquery.cormat
+rquery.cormat(Data_reg_trans[4:7], type='full',
+              graph=TRUE, graphType="correlogram")
+vif(model1)
+vif(model2)
+vif(model3)
+```
+
+#### d. Print some model diagnositcs for homoscedasticity
+```{r}
+par(mfrow=c(2,2))    
+#plot to 2 by 2 array
+plot(model3)
+```
+
+#### e.Independence of errors
+```{r}
+# Standard autocorrelation: run durbin-watson test
+DW <- durbinWatsonTest(model3)
+tidy(DW)
+# Plot the residuals to check spatial autocorrelation
+tmap_mode("plot")
+
+tm_res <- tm_shape(LonBoroughstrans) +
+  tm_polygons("model3resids", palette = "RdYlBu")+
+tm_layout(main.title = "Map of residuals of Model 3", main.title.position = "center", main.title.size = 1.4, 
+          legend.show=TRUE, legend.position=c("left","bottom"), legend.title.size = 0.9, legend.frame=TRUE)+
+  tm_scale_bar(position=c("right", "top"), text.size=0.6)+
+  tm_compass(north=0,type="8star", position=c("left", "top"))+
+  tm_credits("Contains National Statistics\nand Ordnance Survey\ndata © Crown copyright\nand database right [2015]\nDepartment: CASA-UCL\nCourse:GIS, Professors:\nA.Denett & A.Maclachlan\nCreated by: Eleni Kalantzi\nDate: 27/12/20", position=c("right", "bottom"))
+tm_res
+tmap_save(tm_res, 'Static_resid_3.png', dpi=300)
+```
+
+#### Start calculating Moran's I:
+```{r}
+# Calculate the centroids of all Boroughs in London
+coordsB <- LondonBoroughs%>%
+  st_centroid()%>%
+  st_geometry()
+
+plot(coordsB,axes=TRUE)
+
+# create a neighbours list
+LB_nb <- LonBoroughstrans %>%
+  poly2nb(., queen=T)
+
+# and 4 nearest neighbours
+knn_boroughs <-coordsB %>%
+  knearneigh(., k=4)
+LB_knn <- knn_boroughs %>%
+  knn2nb()
+
+# then plot them
+plot(LB_nb, st_geometry(coordsB), col="red")
+plot(LondonBoroughs$geometry, add=T)
+plot(LB_knn, st_geometry(coordsB), col="blue")
+plot(LondonBoroughs$geometry, add=T)
+
+# Create a spatial weights matrix object from these weights
+
+LB.queens_weight <- LB_nb %>%
+  nb2listw(., style="C")
+
+LB.knn_4_weight <- LB_knn %>%
+  nb2listw(., style="C")
+
+LB.knn_4_weight
+LB.queens_weight
+
+# Moran's I for Queen and Knn4 for residuals
+Queen <- LonBoroughstrans %>%
+  st_drop_geometry()%>%
+  dplyr::select(model3resids)%>%
+  pull()%>%
+  moran.test(., LB.queens_weight)%>%
+  tidy()
+Nearest_neighbour <- LonBoroughstrans %>%
+  st_drop_geometry()%>%
+  dplyr::select(model3resids)%>%
+  pull()%>%
+  moran.test(., LB.knn_4_weight)%>%
+  tidy()
+Queen
+Nearest_neighbour
+
+# Moran's I for model 3
+lm.morantest(model3, LB.knn_4_weight)
+lm.morantest(model3, LB.queens_weight)
+```
+
+## 3. Spatial Regression models
+#### We'll run regression for Spatial lag model first:
+```{r}
+# Spatial lag model for queen
+slag_dv_model3_queen <- lagsarlm(`Percentage_of _Obese_Children_in_Year_6` ~ `Median_annual_income _^-2.5` + 
+                                   log_Population_per_square_km +
+                                   Percentage_of_homes_with_deficiency_in_access_to_nature +
+                                   `Fast_food_outlets_per_100_residents_^-1`,
+                                  data = LonBoroughstrans,
+                                  tol.solve=4.39317e-27,
+                                  nb2listw(LB_nb, style="C"),
+                                  method = "eigen")
+tidy(slag_dv_model3_queen)
+glance(slag_dv_model3_queen)
+summary(slag_dv_model3_queen)
+## Spatial lag model for knn-4
+slag_dv_model3_knn4 <- lagsarlm(`Percentage_of _Obese_Children_in_Year_6` ~ `Median_annual_income _^-2.5` + 
+                                  log_Population_per_square_km +
+                                  Percentage_of_homes_with_deficiency_in_access_to_nature +
+                                  `Fast_food_outlets_per_100_residents_^-1`,
+                                 data = LonBoroughstrans,
+                                 tol.solve = 2.46661e-27,
+                                 nb2listw(LB_knn, style="C"), 
+                                 method = "eigen")
+tidy(slag_dv_model3_knn4)
+glance(slag_dv_model3_knn4)
+summary(slag_dv_model3_knn4)
+```
+
+#### We'll check the residuals:
+```{r}
+# Residuals from spatial lag model
+LonBoroughstrans <- LonBoroughstrans %>%
+  mutate(slag_dv_model3_knn_resids = residuals(slag_dv_model3_knn4))
+
+KNN4Moran <- LonBoroughstrans %>%
+  st_drop_geometry()%>%
+  dplyr::select(slag_dv_model3_knn_resids)%>%
+  pull()%>%
+  moran.test(., LB.knn_4_weight)%>%
+  tidy()
+
+KNN4Moran
+
+LonBoroughstrans <- LonBoroughstrans %>%
+  mutate(slag_dv_model3_queen_resids = residuals(slag_dv_model3_queen))
+
+QueenMoran <- LonBoroughstrans %>%
+  st_drop_geometry()%>%
+  dplyr::select(slag_dv_model3_queen_resids)%>%
+  pull()%>%
+  moran.test(., LB.queens_weight)%>%
+  tidy()
+
+QueenMoran
+```
+
+#### Then, we'll run Spatial Error Model:
+```{r}
+# SEM for Queen
+SEM_model3_queen <- errorsarlm(`Percentage_of _Obese_Children_in_Year_6` ~ `Median_annual_income _^-2.5` + 
+                                 log_Population_per_square_km +
+                                 Percentage_of_homes_with_deficiency_in_access_to_nature +
+                                 `Fast_food_outlets_per_100_residents_^-1`,
+                                  data = LonBoroughstrans,
+                                  tol.solve = 3.19139e-27,
+                                 nb2listw(LB_nb, style="C"),
+                                 method = "eigen")
+tidy(SEM_model3_queen)
+glance(SEM_model3_queen)
+summary(SEM_model3_queen)
+## SEM for KNN4
+SEM_model3_knn4 <- errorsarlm(`Percentage_of _Obese_Children_in_Year_6` ~ `Median_annual_income _^-2.5` + 
+                                log_Population_per_square_km +
+                                Percentage_of_homes_with_deficiency_in_access_to_nature +
+                                `Fast_food_outlets_per_100_residents_^-1`,
+                              data = LonBoroughstrans,
+                              tol.solve = 3.19139e-27,
+                               nb2listw(LB_knn, style="C"),
+                               method = "eigen")
+tidy(SEM_model3_knn4)
+glance(SEM_model3_knn4)
+summary(SEM_model3_knn4)
+```
+
+## 4. GWR model
+```{r}
+# Set projections
+st_crs(LonBoroughstrans) = 27700
+LonBoroughsSPtrans <- LonBoroughstrans %>%
+  as(., "Spatial")
+st_crs(coordsB) = 27700
+coordsBSP <- coordsB %>%
+  as(., "Spatial")
+coordsBSP
+
+# calculate bandwitch
+GWRbandwidthtrans <- gwr.sel(Percentage_of._Obese_Children_in_Year_6 ~ Median_annual_income._..2.5 + 
+                          log_Population_per_square_km +
+                          Percentage_of_homes_with_deficiency_in_access_to_nature +
+                          Fast_food_outlets_per_100_residents_..1,
+                        data = LonBoroughsSPtrans, 
+                        coords=coordsBSP,
+                        adapt=T)
+GWRbandwidthtrans
+
+# run the GWR model
+gwr.modeltrans = gwr(Percentage_of._Obese_Children_in_Year_6 ~ Median_annual_income._..2.5 + 
+                       log_Population_per_square_km +
+                       Percentage_of_homes_with_deficiency_in_access_to_nature +
+                       Fast_food_outlets_per_100_residents_..1,
+                  data = LonBoroughsSPtrans,
+                coords=coordsBSP,
+                adapt=GWRbandwidthtrans,
+                hatmatrix = TRUE,
+                se.fit = TRUE)
+```
+
+#### Let's print the results of the GWR model:
+```{r}
+gwr.modeltrans
+resultstrans <- as.data.frame(gwr.modeltrans$SDF)
+names(resultstrans)
+```
+
+#### Moran's I for GWR:
+```{r}
+gwr.morantest(gwr.modeltrans, LB.queens_weight)
+gwr.morantest(gwr.modeltrans, LB.knn_4_weight)
+```
+
+#### Monte Carlo approach:
+```{r}
+res.mont <- gwr.montecarlo(Percentage_of._Obese_Children_in_Year_6 ~ Median_annual_income._..2.5 + 
+                             log_Population_per_square_km +
+                             Percentage_of_homes_with_deficiency_in_access_to_nature +
+                             Fast_food_outlets_per_100_residents_..1,
+                           data = LonBoroughsSPtrans, bw = 30, adaptive = TRUE,
+                          nsims = 95, kernel="gaussian")
+bw <- bw.gwr(Percentage_of._Obese_Children_in_Year_6 ~ Median_annual_income._..2.5 + 
+         log_Population_per_square_km +
+         Percentage_of_homes_with_deficiency_in_access_to_nature +
+         Fast_food_outlets_per_100_residents_..1,
+       data = LonBoroughsSPtrans,
+       approach = "AIC", kernel="gaussian")
+res.mont
+bw
+```
+
+#### Attach coefficients to original SF and plot them:
+```{r}
+LonBoroughs2 <- LonBoroughstrans %>%
+  mutate(coefMedinc = resultstrans$Median_annual_income._..2.5,
+         coefPopdens = resultstrans$log_Population_per_square_km ,
+         coefaccnat = resultstrans$Percentage_of_homes_with_deficiency_in_access_to_nature,
+         coeffastfood = resultstrans$Fast_food_outlets_per_100_residents_..1)
+tmap_mode("view")
+tm_shape(LonBoroughs2) +
+  tm_polygons(col = "coefMedinc", palette = "RdBu", alpha = 0.6)
+tm_shape(LonBoroughs2) +
+  tm_polygons(col = "coefPopdens", palette = "RdBu", alpha = 0.6)
+tm_shape(LonBoroughs2) +
+  tm_polygons(col = "coefaccnat", palette = "RdBu", alpha = 0.6)
+tm_shape(LonBoroughs2) +
+  tm_polygons(col = "coeffastfood", palette = "RdBu", alpha = 0.6, midpoint = NA)
+```
+
+#### Run the significance test:
+```{r}
+sigTest1 = abs(gwr.modeltrans$SDF$Median_annual_income._..2.5)-2 * gwr.modeltrans$SDF$Median_annual_income._..2.5_se
+sigTest2 = abs(gwr.modeltrans$SDF$log_Population_per_square_km)-2 * gwr.modeltrans$SDF$log_Population_per_square_km_se
+sigTest3 = abs(gwr.modeltrans$SDF$Percentage_of_homes_with_deficiency_in_access_to_nature)-2 * gwr.modeltrans$SDF$Percentage_of_homes_with_deficiency_in_access_to_nature_se
+sigTest4 = abs(gwr.modeltrans$SDF$Fast_food_outlets_per_100_residents_..1)-2 * gwr.modeltrans$SDF$Fast_food_outlets_per_100_residents_..1_se
+```
+
+#### Finally, let's plot significance results:
+```{r}
+tmap_mode("view")
+LonBoroughs2 <- LonBoroughs2 %>%
+  mutate(GWRMedincSig = sigTest1)
+tm_shape(LonBoroughs2) +
+  tm_polygons(col = "GWRMedincSig", palette = "RdYlBu", alpha = 0.6)
+LonBoroughs2 <- LonBoroughs2 %>%
+  mutate(GWRPopdensSig = sigTest2)
+tm_shape(LonBoroughs2) +
+  tm_polygons(col = "GWRPopdensSig", palette = "RdYlBu", alpha = 0.6)
+LonBoroughs2 <- LonBoroughs2 %>%
+  mutate(GWRAccNatSig = sigTest3)
+tm_shape(LonBoroughs2) +
+  tm_polygons(col = "GWRAccNatSig", palette = "RdYlBu", alpha = 0.6)
+LonBoroughs2 <- LonBoroughs2 %>%
+  mutate(GWRFastFoodSig = sigTest4)
+tm_shape(LonBoroughs2) +
+  tm_polygons(col = "GWRFastFoodSig", palette = "RdYlBu", alpha = 0.6)
+sigTest1
+sigTest2
+sigTest3
+sigTest4
+```
+
